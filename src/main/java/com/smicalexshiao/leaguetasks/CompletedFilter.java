@@ -24,34 +24,22 @@
  */
 package com.smicalexshiao.leaguetasks;
 
-import net.runelite.client.config.Config;
-import net.runelite.client.config.ConfigGroup;
-import net.runelite.client.config.ConfigItem;
-
-@ConfigGroup(LeagueTasksConfig.GROUP)
-public interface LeagueTasksConfig extends Config
+public enum CompletedFilter
 {
-	String GROUP = "leaguetasks";
+	ALL("All"),
+	COMPLETED("Completed"),
+	INCOMPLETE("Incomplete");
 
-	@ConfigItem(
-		keyName = "completedFilter",
-		name = "Completed",
-		description = "Show only completed, only incomplete, or all tasks.",
-		position = 1
-	)
-	default CompletedFilter completedFilter()
+	private final String displayName;
+
+	CompletedFilter(String displayName)
 	{
-		return CompletedFilter.ALL;
+		this.displayName = displayName;
 	}
 
-	@ConfigItem(
-		keyName = "hideUnavailable",
-		name = "Hide unmet skill requirement",
-		description = "Hide tasks whose skill requirements you don't yet meet.",
-		position = 2
-	)
-	default boolean hideUnavailable()
+	@Override
+	public String toString()
 	{
-		return false;
+		return displayName;
 	}
 }

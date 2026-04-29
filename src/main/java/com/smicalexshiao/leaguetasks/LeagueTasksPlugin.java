@@ -278,9 +278,9 @@ public class LeagueTasksPlugin extends Plugin
 		return client.getRealSkillLevel(skill);
 	}
 
-	void setHideCompleted(boolean hide)
+	void setCompletedFilter(CompletedFilter filter)
 	{
-		configManager.setConfiguration(LeagueTasksConfig.GROUP, "hideCompleted", hide);
+		configManager.setConfiguration(LeagueTasksConfig.GROUP, "completedFilter", filter);
 	}
 
 	void setHideUnavailable(boolean hide)
