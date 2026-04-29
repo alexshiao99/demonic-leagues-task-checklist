@@ -25,18 +25,27 @@
 package com.smicalexshiao.leaguetasks;
 
 import java.awt.BorderLayout;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.RenderingHints;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import javax.swing.JComponent;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.Icon;
@@ -73,6 +82,9 @@ class LeagueTasksPanel extends PluginPanel
 	private final JPanel listPanel = new JPanel();
 
 	private final List<LeagueTaskRow> currentRows = new ArrayList<>();
+	// Collapsed section state, keyed by "Pinned" or LeagueTaskRegion.name(). Session-only
+	// — not persisted, so headers always start expanded after a restart.
+	private final Map<String, Boolean> collapsedSections = new HashMap<>();
 
 	LeagueTasksPanel(LeagueTasksPlugin plugin, LeagueTasksConfig config, List<LeagueTask> tasks)
 	{
@@ -381,6 +393,10 @@ class LeagueTasksPanel extends PluginPanel
 		CompletedFilter completedFilter = config.completedFilter();
 		PactFilter pactFilter = (PactFilter) pactCombo.getSelectedItem();
 		boolean hideUnavailable = config.hideUnavailable();
+		Set<Integer> pinnedIds = plugin.getPinnedIds();
+
+		List<LeagueTaskRow> pinnedRows = new ArrayList<>();
+		EnumMap<LeagueTaskRegion, List<LeagueTaskRow>> regionRows = new EnumMap<>(LeagueTaskRegion.class);
 
 		int completedTotal = 0;
 		int shown = 0;
@@ -425,12 +441,54 @@ class LeagueTasksPanel extends PluginPanel
 				continue;
 			}
 
+			boolean pinned = pinnedIds.contains(task.getId());
 			Icon regionIcon = plugin.getRegionIcon(task.getRegion());
-			LeagueTaskRow row = new LeagueTaskRow(task, complete, regionIcon, () -> plugin.toggleSelectedTask(task));
+			LeagueTaskRow row = new LeagueTaskRow(task, complete, pinned, regionIcon,
+				() -> plugin.toggleSelectedTask(task),
+				() -> plugin.togglePin(task));
 			row.setSelected(task.equals(plugin.getSelectedTask()));
-			listPanel.add(row);
 			currentRows.add(row);
+			if (pinned)
+			{
+				pinnedRows.add(row);
+			}
+			else
+			{
+				regionRows.computeIfAbsent(task.getRegion(), r -> new ArrayList<>()).add(row);
+			}
 			shown++;
+		}
+
+		if (!pinnedRows.isEmpty())
+		{
+			boolean collapsed = collapsedSections.getOrDefault("Pinned", false);
+			listPanel.add(buildSectionHeader("Pinned", "Pinned", pinnedRows.size(), collapsed));
+			if (!collapsed)
+			{
+				for (LeagueTaskRow r : pinnedRows)
+				{
+					listPanel.add(r);
+				}
+			}
+		}
+		// Region headers add real value once you're seeing 2+ regions; if everything's
+		// in one region (single-select or only one region matched) skip the header.
+		boolean groupByRegion = regionRows.size() >= 2;
+		for (Map.Entry<LeagueTaskRegion, List<LeagueTaskRow>> e : regionRows.entrySet())
+		{
+			LeagueTaskRegion region = e.getKey();
+			boolean collapsed = groupByRegion && collapsedSections.getOrDefault(region.name(), false);
+			if (groupByRegion)
+			{
+				listPanel.add(buildSectionHeader(region.name(), region.getDisplayName(), e.getValue().size(), collapsed));
+			}
+			if (!collapsed)
+			{
+				for (LeagueTaskRow r : e.getValue())
+				{
+					listPanel.add(r);
+				}
+			}
 		}
 
 		if (shown == 0)
@@ -442,6 +500,95 @@ class LeagueTasksPanel extends PluginPanel
 
 		listPanel.revalidate();
 		listPanel.repaint();
+	}
+
+	private JPanel buildSectionHeader(String key, String title, int count, boolean collapsed)
+	{
+		JPanel header = new JPanel(new BorderLayout(6, 0))
+		{
+			@Override
+			public Dimension getMaximumSize()
+			{
+				return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+			}
+		};
+		header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		// Right padding keeps the count from hugging the scrollbar.
+		header.setBorder(new EmptyBorder(4, 8, 4, 12));
+		header.setAlignmentX(LEFT_ALIGNMENT);
+		header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+		header.add(buildCollapseIndicator(collapsed), BorderLayout.WEST);
+
+		JLabel titleLabel = new JLabel(title);
+		titleLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		titleLabel.setFont(FontManager.getRunescapeBoldFont());
+		header.add(titleLabel, BorderLayout.CENTER);
+
+		JLabel countLabel = new JLabel(String.valueOf(count), SwingConstants.RIGHT);
+		countLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		countLabel.setFont(FontManager.getRunescapeSmallFont());
+		// Reserve enough horizontal space that 4-digit counts (1592 max) always render.
+		countLabel.setPreferredSize(new Dimension(40, countLabel.getPreferredSize().height));
+		header.add(countLabel, BorderLayout.EAST);
+
+		header.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				if (e.getButton() == MouseEvent.BUTTON1)
+				{
+					collapsedSections.put(key, !collapsedSections.getOrDefault(key, false));
+					rebuild();
+				}
+			}
+		});
+
+		return header;
+	}
+
+	private static JComponent buildCollapseIndicator(boolean collapsed)
+	{
+		// Drawn directly instead of a unicode arrow — same font-glyph-availability
+		// concern as the pin indicator. A small filled triangle reads as a disclosure
+		// arrow: pointing right when collapsed, down when expanded.
+		JComponent c = new JComponent()
+		{
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				super.paintComponent(g);
+				Graphics2D g2 = (Graphics2D) g.create();
+				try
+				{
+					g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+					g2.setColor(ColorScheme.LIGHT_GRAY_COLOR);
+					int size = 8;
+					int cx = getWidth() / 2;
+					int cy = getHeight() / 2;
+					int[] xs;
+					int[] ys;
+					if (collapsed)
+					{
+						xs = new int[]{cx - size / 2, cx + size / 2, cx - size / 2};
+						ys = new int[]{cy - size / 2, cy, cy + size / 2};
+					}
+					else
+					{
+						xs = new int[]{cx - size / 2, cx + size / 2, cx};
+						ys = new int[]{cy - size / 2, cy - size / 2, cy + size / 2};
+					}
+					g2.fillPolygon(xs, ys, 3);
+				}
+				finally
+				{
+					g2.dispose();
+				}
+			}
+		};
+		c.setPreferredSize(new Dimension(12, 16));
+		return c;
 	}
 
 	private static JPanel buildEmptyState()

@@ -54,4 +54,15 @@ public interface LeagueTasksConfig extends Config
 	{
 		return false;
 	}
+
+	@ConfigItem(
+		keyName = "pinnedTaskIds",
+		name = "Pinned task ids",
+		description = "Comma-separated list of pinned task ids; managed via the panel's right-click menu.",
+		hidden = true
+	)
+	default String pinnedTaskIds()
+	{
+		return "";
+	}
 }

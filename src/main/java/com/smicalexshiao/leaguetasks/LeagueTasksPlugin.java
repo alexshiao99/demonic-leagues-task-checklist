@@ -41,6 +41,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.inject.Inject;
@@ -286,6 +287,57 @@ public class LeagueTasksPlugin extends Plugin
 	void setHideUnavailable(boolean hide)
 	{
 		configManager.setConfiguration(LeagueTasksConfig.GROUP, "hideUnavailable", hide);
+	}
+
+	Set<Integer> getPinnedIds()
+	{
+		String csv = config.pinnedTaskIds();
+		if (csv == null || csv.isEmpty())
+		{
+			return Collections.emptySet();
+		}
+		Set<Integer> out = new HashSet<>();
+		for (String piece : csv.split(","))
+		{
+			String trimmed = piece.trim();
+			if (trimmed.isEmpty())
+			{
+				continue;
+			}
+			try
+			{
+				out.add(Integer.parseInt(trimmed));
+			}
+			catch (NumberFormatException ignored)
+			{
+				// drop malformed ids silently — config got hand-edited or corrupted
+			}
+		}
+		return out;
+	}
+
+	boolean isPinned(LeagueTask task)
+	{
+		return getPinnedIds().contains(task.getId());
+	}
+
+	void togglePin(LeagueTask task)
+	{
+		Set<Integer> ids = new TreeSet<>(getPinnedIds());
+		if (!ids.add(task.getId()))
+		{
+			ids.remove(task.getId());
+		}
+		StringBuilder sb = new StringBuilder();
+		for (int id : ids)
+		{
+			if (sb.length() > 0)
+			{
+				sb.append(',');
+			}
+			sb.append(id);
+		}
+		configManager.setConfiguration(LeagueTasksConfig.GROUP, "pinnedTaskIds", sb.toString());
 	}
 
 	/**

@@ -24,19 +24,26 @@
  */
 package com.smicalexshiao.leaguetasks;
 
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
 import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
@@ -70,7 +77,7 @@ class LeagueTaskRow extends JPanel
 	private boolean selected;
 	private boolean hovered;
 
-	LeagueTaskRow(LeagueTask task, boolean completed, Icon regionIcon, Runnable onClick)
+	LeagueTaskRow(LeagueTask task, boolean completed, boolean pinned, Icon regionIcon, Runnable onClick, Runnable onPinToggle)
 	{
 		this.task = task;
 
@@ -91,6 +98,18 @@ class LeagueTaskRow extends JPanel
 			}
 
 			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				maybeShowPopup(e);
+			}
+
+			@Override
+			public void mouseReleased(MouseEvent e)
+			{
+				maybeShowPopup(e);
+			}
+
+			@Override
 			public void mouseEntered(MouseEvent e)
 			{
 				hovered = true;
@@ -102,6 +121,21 @@ class LeagueTaskRow extends JPanel
 			{
 				hovered = false;
 				applyBackground();
+			}
+
+			// isPopupTrigger fires on press for X11/Win and on release for Mac;
+			// listening to both is the standard cross-platform idiom.
+			private void maybeShowPopup(MouseEvent e)
+			{
+				if (!e.isPopupTrigger())
+				{
+					return;
+				}
+				JPopupMenu menu = new JPopupMenu();
+				JMenuItem pinItem = new JMenuItem(pinned ? "Unpin" : "Pin");
+				pinItem.addActionListener(ev -> onPinToggle.run());
+				menu.add(pinItem);
+				menu.show(LeagueTaskRow.this, e.getX(), e.getY());
 			}
 		});
 
@@ -138,6 +172,44 @@ class LeagueTaskRow extends JPanel
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
 
+		// The location icon doubles as a pin button: hovering swaps it to a star,
+		// clicking it toggles the pin. Click events delivered to the iconLabel don't
+		// bubble to the row's selection handler, so this doesn't change task selection.
+		final Icon defaultIcon = regionIcon;
+		final Icon hoverIcon = new StarIcon(20, pinned, pinned ? new Color(0xFFD080) : ColorScheme.LIGHT_GRAY_COLOR);
+		iconLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		iconLabel.setToolTipText(pinned ? "Unpin task" : "Pin task");
+		iconLabel.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				if (e.getButton() == MouseEvent.BUTTON1)
+				{
+					onPinToggle.run();
+				}
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				iconLabel.setIcon(hoverIcon);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				if (defaultIcon != null)
+				{
+					iconLabel.setIcon(defaultIcon);
+				}
+				else
+				{
+					iconLabel.setIcon(null);
+				}
+			}
+		});
+
 		StringBuilder tooltip = new StringBuilder("<html><body style='width:250px'>");
 		tooltip.append("<b>").append(escape(task.getName())).append("</b>");
 		if (task.isPactTask())
@@ -163,6 +235,70 @@ class LeagueTaskRow extends JPanel
 	public Dimension getMaximumSize()
 	{
 		return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+	}
+
+	// Pin/star icon drawn via Java2D — no font glyph dependency, always renders.
+	private static final class StarIcon implements Icon
+	{
+		private final int size;
+		private final boolean filled;
+		private final Color color;
+
+		StarIcon(int size, boolean filled, Color color)
+		{
+			this.size = size;
+			this.filled = filled;
+			this.color = color;
+		}
+
+		@Override
+		public void paintIcon(Component c, Graphics g, int x, int y)
+		{
+			Graphics2D g2 = (Graphics2D) g.create();
+			try
+			{
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				int outerR = size / 2 - 1;
+				int innerR = outerR / 2;
+				int cx = x + size / 2;
+				int cy = y + size / 2;
+				int[] xs = new int[10];
+				int[] ys = new int[10];
+				for (int i = 0; i < 10; i++)
+				{
+					double angle = -Math.PI / 2 + i * Math.PI / 5;
+					int r = (i % 2 == 0) ? outerR : innerR;
+					xs[i] = cx + (int) Math.round(r * Math.cos(angle));
+					ys[i] = cy + (int) Math.round(r * Math.sin(angle));
+				}
+				g2.setColor(color);
+				if (filled)
+				{
+					g2.fillPolygon(xs, ys, 10);
+				}
+				else
+				{
+					g2.setStroke(new BasicStroke(1.5f));
+					g2.drawPolygon(xs, ys, 10);
+				}
+			}
+			finally
+			{
+				g2.dispose();
+			}
+		}
+
+		@Override
+		public int getIconWidth()
+		{
+			return size;
+		}
+
+		@Override
+		public int getIconHeight()
+		{
+			return size;
+		}
 	}
 
 	void setCompleted(boolean completed)
